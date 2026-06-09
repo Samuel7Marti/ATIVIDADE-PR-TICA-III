@@ -1,0 +1,184 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace EcommerceCenario05
+{
+    // Métodos de pagamento do e-commerce
+    public enum MetodoPagamento
+    {
+        Cartao,
+        Pix,
+        Boleto
+    }
+
+    // Estados do pedido no sistema
+    public enum StatusPedido
+    {
+        AguardandoPagamento,
+        Pago,
+        Cancelado
+    }
+
+    // Contrato para cálculo de frete e prazo
+    public interface ITipoEntrega
+    {
+        string Nome { get; }
+        decimal CalcularFrete(decimal pesoTotal);
+        int CalcularPrazoDias();
+    }
+
+    // Regras da entrega normal
+    public class EntregaNormal : ITipoEntrega
+    {
+        public string Nome => "Entrega Normal";
+        public decimal CalcularFrete(decimal pesoTotal) => pesoTotal * 2.5m + 10.00m;
+        public int CalcularPrazoDias() => 7;
+    }
+
+    // Regras da entrega expressa
+    public class EntregaExpressa : ITipoEntrega
+    {
+        public string Nome => "Entrega Expressa";
+        public decimal CalcularFrete(decimal pesoTotal) => pesoTotal * 5.0m + 25.00m;
+        public int CalcularPrazoDias() => 2;
+    }
+
+    // Dados cadastrais do produto
+    public class Produto
+    {
+        public string Id { get; private set; }
+        public string Nome { get; private set; }
+        public decimal Preco { get; private set; }
+        public decimal PesoKg { get; private set; }
+
+        public Produto(string nome, decimal preco, decimal pesoKg)
+        {
+            Id = Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
+            Nome = nome;
+            Preco = preco;
+            PesoKg = pesoKg;
+        }
+    }
+
+    // Representação do item comprado com sua quantidade
+    public class ItemPedido
+    {
+        public Produto Produto { get; private set; }
+        public int Quantidade { get; private set; }
+
+        public ItemPedido(Produto produto, int quantidade)
+        {
+            if (quantidade <= 0) throw new ArgumentException("A quantidade deve ser maior que zero.");
+            Produto = produto;
+            Quantidade = quantidade;
+        }
+
+        public decimal CalcularSubtotal() => Produto.Preco * Quantidade;
+    }
+
+    // Estrutura temporária de compras do usuário
+    public class Carrinho
+    {
+        public List<ItemPedido> Itens { get; private set; } = new List<ItemPedido>();
+
+        // Adiciona ou incrementa produtos no carrinho
+        public void AdicionarProduto(Produto produto, int quantidade)
+        {
+            var itemExistente = Itens.FirstOrDefault(i => i.Produto.Id == produto.Id);
+            if (itemExistente != null)
+            {
+                Itens.Remove(itemExistente);
+                Itens.Add(new ItemPedido(produto, itemExistente.Quantidade + quantidade));
+            }
+            else
+            {
+                Itens.Add(new ItemPedido(produto, quantidade));
+            }
+            Console.WriteLine($"[CARRINHO] {quantidade}x '{produto.Nome}' adicionado.");
+        }
+
+        public decimal CalcularTotalProdutos() => Itens.Sum(i => i.CalcularSubtotal());
+        public decimal CalcularPesoTotal() => Itens.Sum(i => i.Produto.PesoKg * i.Quantidade);
+        public void Limpar() => Itens.Clear();
+    }
+
+    // Entidade final de fechamento da compra
+    public class Pedido
+    {
+        public string Id { get; private set; }
+        public List<ItemPedido> Itens { get; private set; }
+        public ITipoEntrega TipoEntrega { get; private set; }
+        public StatusPedido Status { get; private set; }
+        public decimal ValorProdutos { get; private set; }
+        public decimal ValorFrete { get; private set; }
+        public decimal ValorTotal { get; private set; }
+        public int PrazoEntregaDias { get; private set; }
+        public MetodoPagamento? FormaPagamento { get; private set; }
+
+        // Converte o carrinho em um pedido fixando a entrega
+        public Pedido(Carrinho carrinho, ITipoEntrega tipoEntrega)
+        {
+            if (!carrinho.Itens.Any()) throw new InvalidOperationException("Não é possível fechar um pedido com o carrinho vazio.");
+
+            Id = "PED-" + Guid.NewGuid().ToString().Substring(0, 6).ToUpper();
+            Itens = new List<ItemPedido>(carrinho.Itens);
+            TipoEntrega = tipoEntrega;
+            Status = StatusPedido.AguardandoPagamento;
+
+            ValorProdutos = carrinho.CalcularTotalProdutos();
+            ValorFrete = tipoEntrega.CalcularFrete(carrinho.CalcularPesoTotal());
+            ValorTotal = ValorProdutos + ValorFrete;
+            PrazoEntregaDias = tipoEntrega.CalcularPrazoDias();
+
+            carrinho.Limpar(); // Esvazia o carrinho pós-conversão
+        }
+
+        // Processa a liquidação financeira do pedido
+        public void ConfirmarPagamento(MetodoPagamento metodo)
+        {
+            if (Status != StatusPedido.AguardandoPagamento)
+                throw new InvalidOperationException("Este pedido não está aguardando pagamento.");
+
+            FormaPagamento = metodo;
+            Status = StatusPedido.Pago;
+            Console.WriteLine($"[PAGAMENTO] Pedido {Id} PAGO via {metodo}!");
+        }
+    }
+
+    // Execução da simulação do sistema
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            Console.WriteLine("=== SIMULAÇÃO DE SISTEMA DE E-COMMERCE ===\n");
+
+            // Cadastro do catálogo
+            Produto notebook = new Produto("Notebook Gamer", 4500.00m, 2.500m);
+            Produto mouse = new Produto("Mouse Sem Fio", 150.00m, 0.150m);
+
+            // Fluxo: Cliente monta o carrinho
+            Carrinho carrinho = new Carrinho();
+            carrinho.AdicionarProduto(notebook, 1);
+            carrinho.AdicionarProduto(mouse, 2);
+            Console.WriteLine($"Total parcial do carrinho: {carrinho.CalcularTotalProdutos():C}\n");
+
+            // Fluxo: Conversão de Carrinho para Pedido com escolha de Entrega Expressa
+            ITipoEntrega freteEscolhido = new EntregaExpressa();
+            Console.WriteLine($"[FECHAMENTO] Convertendo carrinho em pedido usando: {freteEscolhido.Nome}...");
+            Pedido novoPedido = new Pedido(carrinho, freteEscolhido);
+
+            // Exibição do resumo financeiro e logístico
+            Console.WriteLine($"\nPedido Gerado: {novoPedido.Id}");
+            Console.WriteLine($"Status Atual: {novoPedido.Status}");
+            Console.WriteLine($"Subtotal Produtos: {novoPedido.ValorProdutos:C}");
+            Console.WriteLine($"Valor do Frete: {novoPedido.ValorFrete:C}");
+            Console.WriteLine($"Valor Total do Pedido: {novoPedido.ValorTotal:C}");
+            Console.WriteLine($"Prazo Estimado de Entrega: {novoPedido.PrazoEntregaDias} dias úteis.\n");
+
+            // Fluxo: Cliente efetua o pagamento via Pix
+            novoPedido.ConfirmarPagamento(MetodoPagamento.Pix);
+            Console.WriteLine($"Status Final do Pedido: {novoPedido.Status}");
+        }
+    }
+}
